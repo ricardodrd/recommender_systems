@@ -12,6 +12,9 @@ import pandas as pd
 import numpy as np
 import ExplicitMF as mf
 
+from nltk.corpus import stopwords 
+from sklearn.metrics.pairwise import cosine_similarity
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from sklearn.metrics.pairwise import linear_kernel
@@ -67,11 +70,33 @@ def statistics(df):
     df_ref.drop_duplicates(subset=['userId', 'documentId'], inplace=True)
     print("Total number of events(drop duplicates): {}".format(df_ref.shape[0]))
     print('Sparsity (drop duplicates): {:4.3f}%'.format(float(df_ref.shape[0]) / float(1000*num_docs) * 100))
+    print("Describe active time:")
+    print(df_ref['activeTime'].describe())
     
+    df_active1 = df_ref[df_ref['activeTime'].notnull()]
+    print(df_active1.shape)
+    df_active = df_ref[(df_ref['activeTime'].notnull()) & (df_ref['activeTime']<250)]
+    print(df_active.shape)
+    
+    # sns.distplot(df_active['activeTime'])
+    plt.hist(df_active['activeTime'], bins=20, color='lightseagreen')
+    plt.show()
+    plt.boxplot(df_active['activeTime'])
+    plt.show()
     user_df = df_ref.groupby(['userId']).size().reset_index(name='counts')
+    print(user_df.head())
     print("Describe by user:")
     print(user_df.describe())
+    exit()
         
+def load_time(df):
+    df_r = df[(df['documentId'].notnull())& (df['activeTime'].notnull())]
+    dup_df = df_r[df_r.duplicated(subset=['userId','documentId'], keep=False)]
+    dd = dup_df[['userId','documentId','activeTime']]
+    dd.sort_values(by='userId')
+    print(dd[dd['userId']=='cx:1m0dupfv97gglk5u9yfw65lhl:2sjgjqpk418jv'])
+    exit()
+
 def load_dataset(df):
     """
         Convert dataframe to user-item-interaction matrix, which is used for 
@@ -147,23 +172,36 @@ def content_processing(df):
     df.drop_duplicates(subset=['userId', 'documentId'], inplace=True)
     df['category'] = df['category'].str.split('|')
     df['category'] = df['category'].fillna("").astype('str')
+    df['title'] = df['title'].str.split(' ')
+    df['title'] = df['title'].fillna("").astype('str')
+    # print(df[['title']].head())
     
     item_ids = df['documentId'].unique().tolist()
     new_df = pd.DataFrame({'documentId':item_ids, 'tid':range(1,len(item_ids)+1)})
     df = pd.merge(df, new_df, on='documentId', how='outer')
-    df_item = df[['tid', 'category']].drop_duplicates(inplace=False)
-    df_item.sort_values(by=['tid', 'category'], ascending=True, inplace=True)
     
+    df_item = df[['tid', 'category']].drop_duplicates(inplace=False)
+    df_title = df[['tid', 'title']].drop_duplicates(inplace=False)
+    df_item.sort_values(by=['tid', 'category'], ascending=True, inplace=True)
+    df_title.sort_values(by=['tid', 'title'], ascending=True, inplace=True)
     # select features/words using TF-IDF 
+    # ngram_range(1,2): Consider unigrams and brigras    
     tf = TfidfVectorizer(analyzer='word',ngram_range=(1, 2),min_df=0)
+    # Import a list of common stopwords in norwegian
+    stopWordsNorsk = set(stopwords.words('norwegian'))
+    tf_title = TfidfVectorizer(stop_words= stopWordsNorsk, analyzer='word',ngram_range=(1, 2),min_df=0)
     tfidf_matrix = tf.fit_transform(df_item['category'])
+    tfidf = tf.fit(df_item['category'])
+    # print(tfidf.vocabulary_)
+    # exit()
     print('Dimension of feature vector: {}'.format(tfidf_matrix.shape))
     # measure similarity of two articles with cosine similarity
-    cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
+    exit()
+    cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+    # cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
     
     print("Similarity Matrix:")
-    print(cosine_sim[:4, :4])
-    exit()
+    
     return cosine_sim, df
 
 def content_recommendation(df, k=20):
@@ -236,8 +274,8 @@ if __name__ == '__main__':
     df = load_data(fpath, flist)
     ###### Get Statistics from dataset ############
     print("Basic statistics of the dataset...")
-    statistics(df)
-    
+    # statistics(df)
+    load_time(df)
     ###### Recommendations based on Collaborative Filtering (Matrix Factorization) #######
     print("Recommendation based on MF...")
     #collaborative_filtering(df)
