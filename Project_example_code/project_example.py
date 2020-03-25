@@ -90,11 +90,12 @@ def statistics(df):
     exit()
         
 def load_time(df):
-    df_r = df[(df['documentId'].notnull())& (df['activeTime'].notnull())]
-    dup_df = df_r[df_r.duplicated(subset=['userId','documentId'], keep=False)]
-    dd = dup_df[['userId','documentId','activeTime']]
-    dd.sort_values(by='userId')
-    print(dd[dd['userId']=='cx:1m0dupfv97gglk5u9yfw65lhl:2sjgjqpk418jv'])
+    #  
+    df_activetime = df[(df['documentId'].notnull())& (df['activeTime'].notnull())]
+    df_activetime.drop_duplicates(subset=['userId', 'documentId','activeTime'], inplace=True)
+    df_activetime = df_activetime[['userId','documentId','activeTime']]
+    df_activetime = df_activetime.groupby(['userId','documentId'], sort=False)['activeTime'].max().reset_index()
+    print(df_activetime.head())
     exit()
 
 def load_dataset(df):
@@ -274,7 +275,7 @@ if __name__ == '__main__':
     df = load_data(fpath, flist)
     ###### Get Statistics from dataset ############
     print("Basic statistics of the dataset...")
-    # statistics(df)
+    #statistics(df)
     load_time(df)
     ###### Recommendations based on Collaborative Filtering (Matrix Factorization) #######
     print("Recommendation based on MF...")
