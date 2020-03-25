@@ -30,7 +30,6 @@ class ExplicitMF():
         self.item_reg = item_reg
         self.user_reg = user_reg
         self._v = verbose
-        self.predictions = np.array()
         
     def als_step(self, latent_vectors, fixed_vecs,
                  ratings, _lambda, type='user'):

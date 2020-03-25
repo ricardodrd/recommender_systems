@@ -11,6 +11,11 @@ import os
 import pandas as pd
 import numpy as np
 import ExplicitMF as mf
+from surprise import Dataset
+from surprise import Reader
+from surprise.model_selection import GridSearchCV
+from surprise import KNNWithMeans
+
 
 from nltk.corpus import stopwords 
 from sklearn.metrics.pairwise import cosine_similarity
@@ -72,16 +77,15 @@ def statistics(df):
     print('Sparsity (drop duplicates): {:4.3f}%'.format(float(df_ref.shape[0]) / float(1000*num_docs) * 100))
     print("Describe active time:")
     print(df_ref['activeTime'].describe())
-    
     df_active1 = df_ref[df_ref['activeTime'].notnull()]
-    print(df_active1.shape)
+    print(df_active1.shape) 
     df_active = df_ref[(df_ref['activeTime'].notnull()) & (df_ref['activeTime']<250)]
     print(df_active.shape)
     
     # sns.distplot(df_active['activeTime'])
-    plt.hist(df_active['activeTime'], bins=20, color='lightseagreen')
+    plt.hist(df_active1['activeTime'], bins=20, color='lightseagreen')
     plt.show()
-    plt.boxplot(df_active['activeTime'])
+    plt.boxplot(df_active1['activeTime'])
     plt.show()
     user_df = df_ref.groupby(['userId']).size().reset_index(name='counts')
     print(user_df.head())
@@ -95,7 +99,22 @@ def load_time(df):
     df_activetime.drop_duplicates(subset=['userId', 'documentId','activeTime'], inplace=True)
     df_activetime = df_activetime[['userId','documentId','activeTime']]
     df_activetime = df_activetime.groupby(['userId','documentId'], sort=False)['activeTime'].max().reset_index()
-    print(df_activetime.head())
+    df_activetime.loc[df_activetime['activeTime'] <= 10, 'rating'] = 1
+    df_activetime.loc[df_activetime['activeTime'] > 10, 'rating'] = 2
+    reader = Reader(rating_scale=(1, 2))
+    data = Dataset.load_from_df(df_activetime[["userId", "documentId", "rating"]], reader)
+    sim_options = {
+        "name": ["msd", "cosine"],
+        "min_support": [3, 4, 5],
+        "user_based": [False, True],
+    }
+    param_grid = {"sim_options": sim_options}
+
+    gs = GridSearchCV(KNNWithMeans, param_grid, measures=["rmse", "mae"], cv=3)
+    gs.fit(data)
+    print(gs.best_score["rmse"])
+    print(gs.best_params["rmse"])
+
     exit()
 
 def load_dataset(df):
@@ -194,10 +213,8 @@ def content_processing(df):
     tfidf_matrix = tf.fit_transform(df_item['category'])
     tfidf = tf.fit(df_item['category'])
     # print(tfidf.vocabulary_)
-    # exit()
     print('Dimension of feature vector: {}'.format(tfidf_matrix.shape))
     # measure similarity of two articles with cosine similarity
-    exit()
     cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
     # cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
     
@@ -240,10 +257,10 @@ def collaborative_filtering(df):
 
     # split ratings into train and test sets
     train, test = train_test_split(ratings, fraction=0.2)
-    print(train.shape)
-    print(test.shape)
-    print(np.array_equal(train, test))
-    exit()
+    # print(train.shape)
+    # print(test.shape)
+    # print(np.array_equal(train, test))
+# 
     # train and test model with matrix factorization
     mf_als = mf.ExplicitMF(train, n_factors=40, 
                            user_reg=0.0, item_reg=0.0)
@@ -252,7 +269,7 @@ def collaborative_filtering(df):
 
     
     # plot out learning curves
-    #plot_learning_curve(iter_array, mf_als)
+    plot_learning_curve(iter_array, mf_als)
     
 
 def plot_learning_curve(iter_array, model):
@@ -276,14 +293,14 @@ if __name__ == '__main__':
     ###### Get Statistics from dataset ############
     print("Basic statistics of the dataset...")
     #statistics(df)
-    load_time(df)
+    #load_time(df)
     ###### Recommendations based on Collaborative Filtering (Matrix Factorization) #######
     print("Recommendation based on MF...")
-    #collaborative_filtering(df)
+    collaborative_filtering(df)
     
     ###### Recommendations based on Content-based Method (Cosine Similarity) ############
     #print("Recommendation based on content-based method...")
-    content_recommendation(df, k=10)
+    #content_recommendation(df, k=10)
     
     
     
