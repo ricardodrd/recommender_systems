@@ -11,12 +11,15 @@ import os
 import pandas as pd
 import numpy as np
 import ExplicitMF as mf
+from surprise.model_selection import cross_validate
+
 from surprise import Dataset
 from surprise import Reader
 from surprise.model_selection import GridSearchCV
 from surprise import KNNWithMeans
-
-
+from surprise import SVD
+from surprise import NMF
+from surprise import SVDpp
 from nltk.corpus import stopwords 
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -92,30 +95,100 @@ def statistics(df):
     print("Describe by user:")
     print(user_df.describe())
     exit()
-        
-def load_time(df):
-    #  
-    df_activetime = df[(df['documentId'].notnull())& (df['activeTime'].notnull())]
-    df_activetime.drop_duplicates(subset=['userId', 'documentId','activeTime'], inplace=True)
-    df_activetime = df_activetime[['userId','documentId','activeTime']]
-    df_activetime = df_activetime.groupby(['userId','documentId'], sort=False)['activeTime'].max().reset_index()
-    df_activetime.loc[df_activetime['activeTime'] <= 10, 'rating'] = 1
-    df_activetime.loc[df_activetime['activeTime'] > 10, 'rating'] = 2
-    reader = Reader(rating_scale=(1, 2))
+
+def time_intervals(df_activetime, partitions=2):
+    reader = Reader()
+    df_activetime.loc[df_activetime['activeTime'] <= 1, 'rating'] = 1
+    if(partitions==2):
+        df_activetime.loc[(df_activetime['activeTime'] > 1), 'rating'] = 2
+        reader = Reader(rating_scale=(1, 2))
+    elif(partitions==3):
+        df_activetime.loc[(df_activetime['activeTime'] > 10) & (df_activetime['activeTime'] <= 30), 'rating'] = 2
+        df_activetime.loc[(df_activetime['activeTime'] > 30), 'rating'] = 3
+        reader = Reader(rating_scale=(1, 3))
+    elif(partitions==4):
+        df_activetime.loc[(df_activetime['activeTime'] > 10) & (df_activetime['activeTime'] <= 30), 'rating'] = 2
+        df_activetime.loc[(df_activetime['activeTime'] > 30) & (df_activetime['activeTime'] <= 60), 'rating'] = 3
+        df_activetime.loc[(df_activetime['activeTime'] > 30), 'rating'] = 4
+        reader = Reader(rating_scale=(1, 4))
     data = Dataset.load_from_df(df_activetime[["userId", "documentId", "rating"]], reader)
+    return data
+
+def load_time(df):
+    df_activetime = df[(df['documentId'].notnull()) & (df['activeTime'].notnull())]
+    df_activetime.drop_duplicates(subset=['userId', 'documentId', 'activeTime'], inplace=True)
+    df_activetime = df_activetime[['userId', 'documentId', 'activeTime']]
+    df_activetime = df_activetime.groupby(['userId', 'documentId'], sort=False)['activeTime'].max().reset_index()
+
+    data = time_intervals(df_activetime, 2)
+    #data3 = time_intervals(df_activetime, 3)
+    #data4 = time_intervals(df_activetime, 4)
+
+    SVD_best(data)
+    #results = {}
+    #knn_best(data2)
+    #results['2'] = SVD_best(data2)
+    #results['3'] = SVD_best(data3)
+    #results['4'] = SVD_best(data4)
+    #plot_results(results)
+    #algo = NMF()
+    exit()
+def plot_results(data):
+    plt.bar(range(len(data)), list(data.values()), align='center', color=['C0', 'C1', 'C2'])
+    plt.xticks(range(len(data)), list(data.keys()))
+    plt.xlabel("Segments")
+    plt.ylabel("MSE")
+    plt.show()
+
+def SVD_best(data):
     sim_options = {
-        "name": ["msd", "cosine"],
-        "min_support": [3, 4, 5],
-        "user_based": [False, True],
+        'n_epochs': 10,
+        'lr_all': 0.005,
+        'reg_all': 0.4
+    }
+    algo = SVD(n_epochs=10, lr_all=0.005, reg_all=0.4)
+    pred = cross_validate(algo, data, measures=['mse'], cv=5, verbose=True)
+    mean = np.mean(pred['test_mse'])
+    return mean
+
+def knn_best(data):
+    sim_options = {
+        "name": "msd",
+        "min_support": 3,
+        "user_based": True
+    }
+    algo = KNNWithMeans(sim_options=sim_options)
+    pred = cross_validate(algo, data, measures=['mse'], cv=5, verbose=True)
+    mean = np.mean(pred['test_mse'])
+    return mean
+
+
+def gid_search(data):
+    # ---------------------KNN--------------------
+    sim_options = {
+        "name": "mcd",
+        "min_support": 3,
+        "user_based": True
     }
     param_grid = {"sim_options": sim_options}
-
-    gs = GridSearchCV(KNNWithMeans, param_grid, measures=["rmse", "mae"], cv=3)
+    gs = GridSearchCV(KNNWithMeans, param_grid, measures=["rmse"], cv=3)
     gs.fit(data)
     print(gs.best_score["rmse"])
     print(gs.best_params["rmse"])
 
-    exit()
+    #---------------SVD--------------
+    #param_grid = {
+     #   "n_epochs": [5, 10],
+      #  "lr_all": [0.002, 0.005],
+      #  "reg_all": [0.4, 0.6]
+    #}
+    #gs = GridSearchCV(SVD, param_grid, measures=["rmse"], cv=3)
+
+    #gs.fit(data)
+
+    #print(gs.best_score["rmse"])
+    #print(gs.best_params["rmse"])
+
 
 def load_dataset(df):
     """
@@ -180,6 +253,37 @@ def evaluate(pred, actual, k):
     print("Recall@{} is {:.4f}".format(k, recall))
     print("ARHR@{} is {:.4f}".format(k, arhr))
     
+def content_processing_title(df):
+
+    df = df[df['documentId'].notnull()]
+    df.drop_duplicates(subset=['userId', 'documentId'], inplace=True)
+    #print("jasdjasdjsa")
+
+    df['title'] = df['title'].map(lambda x: x.replace("- ", "").replace(":", "").replace("?","").replace("!",""))
+    teste = df[df['title'].str.contains("-")]
+    print(teste['title'])
+    df['title'] = df['title'].str.split(' ')
+    df['title'] = df['title'].fillna("").astype('str')
+    # print(df[['title']].head())
+    print("hola")
+    item_ids = df['documentId'].unique().tolist()
+    new_df = pd.DataFrame({'documentId': item_ids, 'tid': range(1, len(item_ids) + 1)})
+    df = pd.merge(df, new_df, on='documentId', how='outer')
+    df_title = df[['tid', 'title']].drop_duplicates(inplace=False)
+    df_title.sort_values(by=['tid', 'title'], ascending=True, inplace=True)
+    # select features/words using TF-IDF
+    # ngram_range(1,2): Consider unigrams and brigras
+    # Import a list of common stopwords in norwegian
+    stopWordsNorsk = set(stopwords.words('norwegian'))
+    tf_title = TfidfVectorizer(stop_words=stopWordsNorsk, analyzer='word', ngram_range=(1, 2), min_df=0)
+    tfidf_matrix = tf_title.fit_transform(df_title['title'])
+
+  #  print('Dimension of feature vector: {}'.format(tfidf_matrix.shape))
+    cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
+
+    print("Similarity Matrix:")
+   # print(cosine_sim[:4, :4])
+    return cosine_sim, df
 
 def content_processing(df):
     """
@@ -192,44 +296,34 @@ def content_processing(df):
     df.drop_duplicates(subset=['userId', 'documentId'], inplace=True)
     df['category'] = df['category'].str.split('|')
     df['category'] = df['category'].fillna("").astype('str')
-    df['title'] = df['title'].str.split(' ')
-    df['title'] = df['title'].fillna("").astype('str')
-    # print(df[['title']].head())
-    
+
     item_ids = df['documentId'].unique().tolist()
     new_df = pd.DataFrame({'documentId':item_ids, 'tid':range(1,len(item_ids)+1)})
     df = pd.merge(df, new_df, on='documentId', how='outer')
-    
     df_item = df[['tid', 'category']].drop_duplicates(inplace=False)
-    df_title = df[['tid', 'title']].drop_duplicates(inplace=False)
     df_item.sort_values(by=['tid', 'category'], ascending=True, inplace=True)
-    df_title.sort_values(by=['tid', 'title'], ascending=True, inplace=True)
-    # select features/words using TF-IDF 
-    # ngram_range(1,2): Consider unigrams and brigras    
-    tf = TfidfVectorizer(analyzer='word',ngram_range=(1, 2),min_df=0)
-    # Import a list of common stopwords in norwegian
-    stopWordsNorsk = set(stopwords.words('norwegian'))
-    tf_title = TfidfVectorizer(stop_words= stopWordsNorsk, analyzer='word',ngram_range=(1, 2),min_df=0)
+
+    # select features/words using TF-IDF
+    tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 2), min_df=0)
     tfidf_matrix = tf.fit_transform(df_item['category'])
-    tfidf = tf.fit(df_item['category'])
-    # print(tfidf.vocabulary_)
     print('Dimension of feature vector: {}'.format(tfidf_matrix.shape))
     # measure similarity of two articles with cosine similarity
-    cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
-    # cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
-    
+
+    cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
+
     print("Similarity Matrix:")
-    
+    print(cosine_sim[:4, :4])
     return cosine_sim, df
+    
 
 def content_recommendation(df, k=20):
     """
         Generate top-k list according to cosine similarity
     """
-    cosine_sim, df = content_processing(df)
+    cosine_sim, df = content_processing_title(df)
     df = df[['userId','time', 'tid', 'title', 'category']]
     df.sort_values(by=['userId', 'time'], ascending=True, inplace=True)
-    print(df[:20]) # see how the dataset looks like
+   # print(df[:20]) # see how the dataset looks like
     pred, actual = [], []
     puid, ptid1, ptid2 = None, None, None
     for row in df.itertuples():
@@ -274,16 +368,16 @@ def collaborative_filtering(df):
 
 def plot_learning_curve(iter_array, model):
     """ Plot learning curves (hasn't been tested) """
-    plt.plot(iter_array, model.train_mse, \
+    plt.plot(iter_array, model.train_mse,
              label='Training', linewidth=5)
-    plt.plot(iter_array, model.test_mse, \
+    plt.plot(iter_array, model.test_mse,
              label='Test', linewidth=5)
 
-    plt.xticks(fontsize=16);
-    plt.yticks(fontsize=16);
-    plt.xlabel('iterations', fontsize=30);
-    plt.ylabel('MSE', fontsize=30);
-    plt.legend(loc='best', fontsize=20);
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+    plt.xlabel('iterations', fontsize=30)
+    plt.ylabel('MSE', fontsize=30)
+    plt.legend(loc='best', fontsize=20)
     
 
 if __name__ == '__main__':
@@ -295,12 +389,12 @@ if __name__ == '__main__':
     #statistics(df)
     #load_time(df)
     ###### Recommendations based on Collaborative Filtering (Matrix Factorization) #######
-    print("Recommendation based on MF...")
+    #print("Recommendation based on MF...")
     collaborative_filtering(df)
     
     ###### Recommendations based on Content-based Method (Cosine Similarity) ############
-    #print("Recommendation based on content-based method...")
-    #content_recommendation(df, k=10)
+    print("Recommendation based on content-based method...")
+    #content_recommendation(df, k=20)
     
     
     
