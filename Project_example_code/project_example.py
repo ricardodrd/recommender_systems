@@ -22,6 +22,7 @@ from surprise import NMF
 from surprise import SVDpp
 from nltk.corpus import stopwords 
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import CountVectorizer
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 
@@ -252,38 +253,82 @@ def evaluate(pred, actual, k):
     recall = tp / float(total_num)
     print("Recall@{} is {:.4f}".format(k, recall))
     print("ARHR@{} is {:.4f}".format(k, arhr))
-    
+
+
+def content_processing_soup(df):
+    df = df[df['documentId'].notnull()]
+    df.drop_duplicates(subset=['userId', 'documentId'], inplace=True)
+    df['title'] = df['title'].map(lambda x: x.replace("- ", "").replace(":", "").replace("?", "").replace("!", ""))
+    df['title'] = df['title'].fillna("").astype('str')
+    df['category'] = df['category'].str.split('|')
+    df['category'] = df['category'].fillna("").astype('str')
+
+    item_ids = df['documentId'].unique().tolist()
+    new_df = pd.DataFrame({'documentId': item_ids, 'tid': range(1, len(item_ids) + 1)})
+    df = pd.merge(df, new_df, on='documentId', how='outer')
+    df_item = df[['tid', 'category','title']].drop_duplicates(inplace=False)
+    df_item.sort_values(by=['tid', 'category'], ascending=True, inplace=True)
+
+    df_item['soup'] = df_item.apply(create_soup, axis=1)
+    print(df_item['soup'])
+
+    stopWordsNorsk = set(stopwords.words('norwegian'))
+
+    tf = TfidfVectorizer(stop_words=stopWordsNorsk, analyzer='word', ngram_range=(1, 2), min_df=2)
+    tfidf_matrix = tf.fit_transform(df_item['soup'])
+
+    print('Dimension of feature vector: {}'.format(tfidf_matrix.shape))
+    # measure similarity of two articles with cosine similarity
+
+    cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
+
+    print("Similarity Matrix:")
+    print(cosine_sim[:4, :4])
+    return cosine_sim, df
+
+
+
+def create_soup(x):
+    return ''.join(x['title']) + ' ' + ' '.join(x['category'])
+
+
+
 def content_processing_title(df):
 
     df = df[df['documentId'].notnull()]
     df.drop_duplicates(subset=['userId', 'documentId'], inplace=True)
     #print("jasdjasdjsa")
 
-    df['title'] = df['title'].map(lambda x: x.replace("- ", "").replace(":", "").replace("?","").replace("!",""))
-    teste = df[df['title'].str.contains("-")]
-    print(teste['title'])
-    df['title'] = df['title'].str.split(' ')
+    df['title'] = df['title'].map(lambda x: x.replace("- ", "").replace(":", "").replace("?", "").replace("!", ""))
+
+    #df['title'] = df['title'].str.split(' ')
     df['title'] = df['title'].fillna("").astype('str')
     # print(df[['title']].head())
-    print("hola")
     item_ids = df['documentId'].unique().tolist()
     new_df = pd.DataFrame({'documentId': item_ids, 'tid': range(1, len(item_ids) + 1)})
     df = pd.merge(df, new_df, on='documentId', how='outer')
     df_title = df[['tid', 'title']].drop_duplicates(inplace=False)
     df_title.sort_values(by=['tid', 'title'], ascending=True, inplace=True)
+
     # select features/words using TF-IDF
     # ngram_range(1,2): Consider unigrams and brigras
     # Import a list of common stopwords in norwegian
     stopWordsNorsk = set(stopwords.words('norwegian'))
-    tf_title = TfidfVectorizer(stop_words=stopWordsNorsk, analyzer='word', ngram_range=(1, 2), min_df=0)
-    tfidf_matrix = tf_title.fit_transform(df_title['title'])
+    tf_title = TfidfVectorizer(stop_words=stopWordsNorsk, analyzer='word', ngram_range=(1, 3), min_df=1)
 
-  #  print('Dimension of feature vector: {}'.format(tfidf_matrix.shape))
+
+    tfidf_matrix = tf_title.fit_transform(df_title['title'])
+    #exit()
+    print('Dimension of feature vector: {}'.format(tfidf_matrix.shape))
+
     cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
 
     print("Similarity Matrix:")
    # print(cosine_sim[:4, :4])
     return cosine_sim, df
+
+
+#def content_processing_soup():
 
 def content_processing(df):
     """
@@ -298,7 +343,7 @@ def content_processing(df):
     df['category'] = df['category'].fillna("").astype('str')
 
     item_ids = df['documentId'].unique().tolist()
-    new_df = pd.DataFrame({'documentId':item_ids, 'tid':range(1,len(item_ids)+1)})
+    new_df = pd.DataFrame({'documentId': item_ids, 'tid': range(1, len(item_ids) + 1)})
     df = pd.merge(df, new_df, on='documentId', how='outer')
     df_item = df[['tid', 'category']].drop_duplicates(inplace=False)
     df_item.sort_values(by=['tid', 'category'], ascending=True, inplace=True)
@@ -320,7 +365,7 @@ def content_recommendation(df, k=20):
     """
         Generate top-k list according to cosine similarity
     """
-    cosine_sim, df = content_processing_title(df)
+    cosine_sim, df = content_processing(df)
     df = df[['userId','time', 'tid', 'title', 'category']]
     df.sort_values(by=['userId', 'time'], ascending=True, inplace=True)
    # print(df[:20]) # see how the dataset looks like
@@ -390,11 +435,12 @@ if __name__ == '__main__':
     #load_time(df)
     ###### Recommendations based on Collaborative Filtering (Matrix Factorization) #######
     #print("Recommendation based on MF...")
-    collaborative_filtering(df)
+    #collaborative_filtering(df)
     
     ###### Recommendations based on Content-based Method (Cosine Similarity) ############
     print("Recommendation based on content-based method...")
-    #content_recommendation(df, k=20)
+    content_recommendation(df, k=20)
+
     
     
     
