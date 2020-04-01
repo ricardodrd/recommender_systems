@@ -120,7 +120,7 @@ class ExplicitMF():
             
             predictions = self.predict()
             
-            self.train_mse = [self.get_mse(predictions, self.ratings)]
+            self.train_mse += [self.get_mse(predictions, self.ratings)]
             self.test_mse += [self.get_mse(predictions, test)]
             if self._v:
                 print("Train mse: {}".format(str(self.train_mse[-1])))

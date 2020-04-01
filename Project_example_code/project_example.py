@@ -20,7 +20,7 @@ from surprise import KNNWithMeans
 from surprise import SVD
 from surprise import NMF
 from surprise import SVDpp
-from nltk.corpus import stopwords 
+from nltk.corpus import stopwords
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import CountVectorizer
 
@@ -30,11 +30,13 @@ from sklearn.metrics.pairwise import linear_kernel
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+
 sns.set()
+
 
 def traverse_dir(rootDir, level=2):
     dir_list = []
-    print (">>>",rootDir)
+    print(">>>", rootDir)
     for lists in os.listdir(rootDir):
         path = os.path.join(rootDir, lists)
         if level == 1:
@@ -46,6 +48,7 @@ def traverse_dir(rootDir, level=2):
             else:
                 dir_list.append(path)
     return dir_list
+
 
 def load_data(rootpath, flist):
     """
@@ -60,103 +63,142 @@ def load_data(rootpath, flist):
                 map_lst.append(obj)
     return pd.DataFrame(map_lst)
 
+
 def statistics(df):
     """
         Basic statistics based on loaded dataframe
     """
     total_num = df.shape[0]
-    
+
     print("Total number of events(front page incl.): {}".format(total_num))
     df.sort_values(by=['userId', 'time'], ascending=True, inplace=True)
     df_ref = df[df['documentId'].notnull()]
     num_act = df_ref.shape[0]
-    
+
     print("Total number of events(without front page): {}".format(num_act))
     num_docs = df_ref['documentId'].nunique()
-    
+
     print("Total number of documents: {}".format(num_docs))
-    print('Sparsity: {:4.3f}%'.format(float(num_act) / float(1000*num_docs) * 100))
+    print('Sparsity: {:4.3f}%'.format(float(num_act) / float(1000 * num_docs) * 100))
     df_ref.drop_duplicates(subset=['userId', 'documentId'], inplace=True)
     print("Total number of events(drop duplicates): {}".format(df_ref.shape[0]))
-    print('Sparsity (drop duplicates): {:4.3f}%'.format(float(df_ref.shape[0]) / float(1000*num_docs) * 100))
+    print('Sparsity (drop duplicates): {:4.3f}%'.format(float(df_ref.shape[0]) / float(1000 * num_docs) * 100))
     print("Describe active time:")
     print(df_ref['activeTime'].describe())
+
+    # ----------------------------------------------------------------------
     df_active1 = df_ref[df_ref['activeTime'].notnull()]
-    print(df_active1.shape) 
-    df_active = df_ref[(df_ref['activeTime'].notnull()) & (df_ref['activeTime']<250)]
+    print(df_active1.shape)
+    df_active = df_ref[(df_ref['activeTime'].notnull()) & (df_ref['activeTime'] < 250)]
     print(df_active.shape)
-    
+
     # sns.distplot(df_active['activeTime'])
     plt.hist(df_active1['activeTime'], bins=20, color='lightseagreen')
     plt.show()
     plt.boxplot(df_active1['activeTime'])
     plt.show()
+    #----------------------------------------------------------------------
+
     user_df = df_ref.groupby(['userId']).size().reset_index(name='counts')
     print(user_df.head())
     print("Describe by user:")
     print(user_df.describe())
     exit()
 
-def time_intervals(df_activetime, partitions=2):
+
+def get_data_time_intervals(df, partitions=2, time=10):
     reader = Reader()
-    df_activetime.loc[df_activetime['activeTime'] <= 1, 'rating'] = 1
-    if(partitions==2):
-        df_activetime.loc[(df_activetime['activeTime'] > 1), 'rating'] = 2
+    df.loc[df['activeTime'] <= time, 'rating'] = 1
+    if (partitions == 2):
+        df.loc[(df['activeTime'] > time), 'rating'] = 2
         reader = Reader(rating_scale=(1, 2))
-    elif(partitions==3):
-        df_activetime.loc[(df_activetime['activeTime'] > 10) & (df_activetime['activeTime'] <= 30), 'rating'] = 2
-        df_activetime.loc[(df_activetime['activeTime'] > 30), 'rating'] = 3
+    elif (partitions == 3):
+        df.loc[(df['activeTime'] > 10) & (df['activeTime'] <= 30), 'rating'] = 2
+        df.loc[(df['activeTime'] > 30), 'rating'] = 3
         reader = Reader(rating_scale=(1, 3))
-    elif(partitions==4):
-        df_activetime.loc[(df_activetime['activeTime'] > 10) & (df_activetime['activeTime'] <= 30), 'rating'] = 2
-        df_activetime.loc[(df_activetime['activeTime'] > 30) & (df_activetime['activeTime'] <= 60), 'rating'] = 3
-        df_activetime.loc[(df_activetime['activeTime'] > 30), 'rating'] = 4
+    elif (partitions == 4):
+        df.loc[(df['activeTime'] > 10) & (df['activeTime'] <= 30), 'rating'] = 2
+        df.loc[(df['activeTime'] > 30) & (df['activeTime'] <= 60), 'rating'] = 3
+        df.loc[(df['activeTime'] > 60), 'rating'] = 4
         reader = Reader(rating_scale=(1, 4))
-    data = Dataset.load_from_df(df_activetime[["userId", "documentId", "rating"]], reader)
+    data = Dataset.load_from_df(df[["userId", "documentId", "rating"]], reader)
     return data
 
-def load_time(df):
-    df_activetime = df[(df['documentId'].notnull()) & (df['activeTime'].notnull())]
-    df_activetime.drop_duplicates(subset=['userId', 'documentId', 'activeTime'], inplace=True)
-    df_activetime = df_activetime[['userId', 'documentId', 'activeTime']]
+def compare_parameters_SVD(df, opt='time'):
+    """
+        This function plots the results of the mse error. It allows two options.
+            opt=True: compares mse for different number of divisions in active time.
+            opt=False: compares mse for two divisions of active time using different times.
+    """
+    datasets = []
+    intervals = []
+    # -----------------------------------------------
+    #             Compare intervals
+    # ----------------------------------------------
+    if (opt=='intervals'):
+        intervals = [4, 3, 2]
+        # Initialize different datasets using different time intervals
+        for interval in intervals:
+            datasets.append(get_data_time_intervals(df, interval))
+
+    # --------------------------------------------------
+    #       Compare activetimes using only two intervals
+    # --------------------------------------------------
+    else:
+        intervals = [5, 10, 20, 30, 60]
+        for time in intervals:
+            datasets.append(get_data_time_intervals(df, 2, time))
+
+    results = []
+    for data in datasets:
+        results.append(SVD_best(data))
+    plot_learning_curve(intervals, results)
+
+
+def collaborative_activeTime(df):
+    df_raw = df[(df['documentId'].notnull()) & (df['activeTime'].notnull())]
+    df_raw.drop_duplicates(subset=['userId', 'documentId', 'activeTime'])
+    df_activetime = df_raw[['userId', 'documentId', 'activeTime']]
     df_activetime = df_activetime.groupby(['userId', 'documentId'], sort=False)['activeTime'].max().reset_index()
 
-    data = time_intervals(df_activetime, 2)
-    #data3 = time_intervals(df_activetime, 3)
-    #data4 = time_intervals(df_activetime, 4)
+    compare_parameters_SVD(df_activetime, 'intervals')
 
-    SVD_best(data)
-    #results = {}
-    #knn_best(data2)
-    #results['2'] = SVD_best(data2)
-    #results['3'] = SVD_best(data3)
-    #results['4'] = SVD_best(data4)
-    #plot_results(results)
-    #algo = NMF()
     exit()
+    data = get_data_time_intervals(df_activetime, 2)
+    #grid_search(data)
+    # dictionary with the results for each algorithm
+    results = {'SVD': SVD_best(data), 'NMF': NMF_best(data),
+               'KNN-user_based': KNN_best(data, True), 'KNN-item_based': KNN_best(data, False)}
+    plot_results(results)
+
 def plot_results(data):
-    plt.bar(range(len(data)), list(data.values()), align='center', color=['C0', 'C1', 'C2'])
+    """
+        This function is used to plot a barchar with the results of the lowest mse for each algorithm
+    """
+    plt.bar(range(len(data)), list(data.values()), align='center', color=['C0', 'C1', 'C2', 'C3'])
     plt.xticks(range(len(data)), list(data.keys()))
-    plt.xlabel("Segments")
+    plt.xlabel("Algorithm")
     plt.ylabel("MSE")
     plt.show()
 
+
 def SVD_best(data):
-    sim_options = {
-        'n_epochs': 10,
-        'lr_all': 0.005,
-        'reg_all': 0.4
-    }
     algo = SVD(n_epochs=10, lr_all=0.005, reg_all=0.4)
     pred = cross_validate(algo, data, measures=['mse'], cv=5, verbose=True)
     mean = np.mean(pred['test_mse'])
     return mean
 
-def knn_best(data):
+def NMF_best(data):
+    algo = NMF(n_epochs=20, n_factors=10)
+    pred = cross_validate(algo, data, measures=['mse'], cv=5, verbose=True)
+    mean = np.mean(pred['test_mse'])
+    return mean
+
+def KNN_best(data, opt=True):
     sim_options = {
         "name": "msd",
         "min_support": 3,
-        "user_based": True
+        "user_based": opt
     }
     algo = KNNWithMeans(sim_options=sim_options)
     pred = cross_validate(algo, data, measures=['mse'], cv=5, verbose=True)
@@ -164,36 +206,35 @@ def knn_best(data):
     return mean
 
 
-def gid_search(data):
+def grid_search(data):
     # ---------------------KNN--------------------
-    sim_options = {
-        "name": "mcd",
-        "min_support": 3,
-        "user_based": True
-    }
-    param_grid = {"sim_options": sim_options}
-    gs = GridSearchCV(KNNWithMeans, param_grid, measures=["rmse"], cv=3)
-    gs.fit(data)
-    print(gs.best_score["rmse"])
-    print(gs.best_params["rmse"])
-
-    #---------------SVD--------------
-    #param_grid = {
-     #   "n_epochs": [5, 10],
-      #  "lr_all": [0.002, 0.005],
-      #  "reg_all": [0.4, 0.6]
+    #sim_options = {
+    #    "name": "mcd",
+    #    "min_support": 3,
+    #    "user_based": True
     #}
-    #gs = GridSearchCV(SVD, param_grid, measures=["rmse"], cv=3)
-
+    #param_grid = {"sim_options": sim_options}
+    #gs = GridSearchCV(KNNWithMeans, param_grid, measures=["rmse"], cv=3)
     #gs.fit(data)
-
     #print(gs.best_score["rmse"])
     #print(gs.best_params["rmse"])
+
+    # ---------------SVD--------------
+    param_grid = {
+        "n_epochs": [5, 10, 20],
+        "n_factors": [10, 15, 30]
+    }
+    gs = GridSearchCV(NMF, param_grid, measures=["rmse"], cv=3)
+
+    gs.fit(data)
+
+    print(gs.best_score["rmse"])
+    print(gs.best_params["rmse"])
 
 
 def load_dataset(df):
     """
-        Convert dataframe to user-item-interaction matrix, which is used for 
+        Convert dataframe to user-item-interaction matrix, which is used for
         Matrix Factorization based recommendation.
         In rating matrix, clicked events are refered as 1 and others are refered as 0.
     """
@@ -204,7 +245,7 @@ def load_dataset(df):
     n_items = df['documentId'].nunique()
 
     ratings = np.zeros((n_users, n_items))
-    
+
     new_user = df['userId'].values[1:] != df['userId'].values[:-1]
     # print(df['userId'].values[1:])
     # print(df['userId'].values[:-1])
@@ -215,29 +256,31 @@ def load_dataset(df):
     df['uid'] = np.cumsum(new_user)
     # print(df['uid'].nunique())
     item_ids = df['documentId'].unique().tolist()
-    new_df = pd.DataFrame({'documentId':item_ids, 'tid':range(1,len(item_ids)+1)})
-    
+    new_df = pd.DataFrame({'documentId': item_ids, 'tid': range(1, len(item_ids) + 1)})
+
     # print(df.head())
     df = pd.merge(df, new_df, on='documentId', how='outer')
     df_ext = df[['uid', 'tid']]
     print(df_ext)
-    
+
     for row in df_ext.itertuples():
-        ratings[row[1]-1, row[2]-1] = 1.0
+        ratings[row[1] - 1, row[2] - 1] = 1.0
     return ratings
-    
+
+
 def train_test_split(ratings, fraction=0.2):
     """Leave out a fraction of dataset for test use"""
     test = np.zeros(ratings.shape)
     train = ratings.copy()
     for user in range(ratings.shape[0]):
         size = int(len(ratings[user, :].nonzero()[0]) * fraction)
-        test_ratings = np.random.choice(ratings[user, :].nonzero()[0], 
-                                        size=size, 
+        test_ratings = np.random.choice(ratings[user, :].nonzero()[0],
+                                        size=size,
                                         replace=False)
         train[user, test_ratings] = 0.
         test[user, test_ratings] = ratings[user, test_ratings]
     return train, test
+
 
 def evaluate(pred, actual, k):
     """
@@ -249,7 +292,7 @@ def evaluate(pred, actual, k):
     for p, t in zip(pred, actual):
         if t in p:
             tp += 1.
-            arhr += 1./float(p.index(t) + 1.)
+            arhr += 1. / float(p.index(t) + 1.)
     recall = tp / float(total_num)
     print("Recall@{} is {:.4f}".format(k, recall))
     print("ARHR@{} is {:.4f}".format(k, arhr))
@@ -266,14 +309,11 @@ def content_processing_soup(df):
     item_ids = df['documentId'].unique().tolist()
     new_df = pd.DataFrame({'documentId': item_ids, 'tid': range(1, len(item_ids) + 1)})
     df = pd.merge(df, new_df, on='documentId', how='outer')
-    df_item = df[['tid', 'category','title']].drop_duplicates(inplace=False)
+    df_item = df[['tid', 'category', 'title']].drop_duplicates(inplace=False)
     df_item.sort_values(by=['tid', 'category'], ascending=True, inplace=True)
 
     df_item['soup'] = df_item.apply(create_soup, axis=1)
-    print(df_item['soup'])
-
     stopWordsNorsk = set(stopwords.words('norwegian'))
-
     tf = TfidfVectorizer(stop_words=stopWordsNorsk, analyzer='word', ngram_range=(1, 2), min_df=2)
     tfidf_matrix = tf.fit_transform(df_item['soup'])
 
@@ -287,48 +327,39 @@ def content_processing_soup(df):
     return cosine_sim, df
 
 
-
 def create_soup(x):
     return ''.join(x['title']) + ' ' + ' '.join(x['category'])
 
 
-
 def content_processing_title(df):
-
     df = df[df['documentId'].notnull()]
     df.drop_duplicates(subset=['userId', 'documentId'], inplace=True)
-    #print("jasdjasdjsa")
 
     df['title'] = df['title'].map(lambda x: x.replace("- ", "").replace(":", "").replace("?", "").replace("!", ""))
 
-    #df['title'] = df['title'].str.split(' ')
+    # df['title'] = df['title'].str.split(' ')
     df['title'] = df['title'].fillna("").astype('str')
-    # print(df[['title']].head())
     item_ids = df['documentId'].unique().tolist()
     new_df = pd.DataFrame({'documentId': item_ids, 'tid': range(1, len(item_ids) + 1)})
     df = pd.merge(df, new_df, on='documentId', how='outer')
     df_title = df[['tid', 'title']].drop_duplicates(inplace=False)
     df_title.sort_values(by=['tid', 'title'], ascending=True, inplace=True)
 
-    # select features/words using TF-IDF
-    # ngram_range(1,2): Consider unigrams and brigras
-    # Import a list of common stopwords in norwegian
+    # The option ngram_range(1,3): Consider unigrams, brigras and trigrams
+    # Import a list of common stopwords in norwegian to be avoided when obtaining the TF-IDF
     stopWordsNorsk = set(stopwords.words('norwegian'))
     tf_title = TfidfVectorizer(stop_words=stopWordsNorsk, analyzer='word', ngram_range=(1, 3), min_df=1)
 
-
     tfidf_matrix = tf_title.fit_transform(df_title['title'])
-    #exit()
     print('Dimension of feature vector: {}'.format(tfidf_matrix.shape))
 
     cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
 
     print("Similarity Matrix:")
-   # print(cosine_sim[:4, :4])
+    # print(cosine_sim[:4, :4])
     return cosine_sim, df
 
 
-#def content_processing_soup():
 
 def content_processing(df):
     """
@@ -359,16 +390,23 @@ def content_processing(df):
     print("Similarity Matrix:")
     print(cosine_sim[:4, :4])
     return cosine_sim, df
-    
 
-def content_recommendation(df, k=20):
+
+def content_recommendation(df, k=20, opt='category'):
     """
         Generate top-k list according to cosine similarity
+        Conten-based recommendation based on category, title or a combination of both
     """
-    cosine_sim, df = content_processing(df)
-    df = df[['userId','time', 'tid', 'title', 'category']]
+    if(opt=='title'):
+        cosine_sim, df = content_processing_title(df)
+    elif(opt=='soup'):
+        cosine_sim, df = content_processing_soup(df)
+    else:
+        cosine_sim, df = content_processing(df)
+
+    df = df[['userId', 'time', 'tid', 'title', 'category']]
     df.sort_values(by=['userId', 'time'], ascending=True, inplace=True)
-   # print(df[:20]) # see how the dataset looks like
+    # print(df[:20]) # see how the dataset looks like
     pred, actual = [], []
     puid, ptid1, ptid2 = None, None, None
     for row in df.itertuples():
@@ -377,8 +415,8 @@ def content_recommendation(df, k=20):
             idx = ptid1
             sim_scores = list(enumerate(cosine_sim[idx]))
             sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-            sim_scores = sim_scores[1:k+1]
-            sim_scores = [i for i,j in sim_scores]
+            sim_scores = sim_scores[1:k + 1]
+            sim_scores = [i for i, j in sim_scores]
             pred.append(sim_scores)
             actual.append(ptid2)
             puid, ptid1, ptid2 = uid, tid, tid
@@ -386,10 +424,10 @@ def content_recommendation(df, k=20):
             ptid1 = ptid2
             ptid2 = tid
             puid = uid
-    
+
     evaluate(pred, actual, k)
-    
-    
+
+
 def collaborative_filtering(df):
     # get rating matrix
     ratings = load_dataset(df)
@@ -399,31 +437,29 @@ def collaborative_filtering(df):
     # print(train.shape)
     # print(test.shape)
     # print(np.array_equal(train, test))
-# 
+    #
     # train and test model with matrix factorization
-    mf_als = mf.ExplicitMF(train, n_factors=40, 
+    mf_als = mf.ExplicitMF(train, n_factors=40,
                            user_reg=0.0, item_reg=0.0)
     iter_array = [1, 2, 5, 10, 25, 50, 100]
     mf_als.calculate_learning_curve(iter_array, test)
-
-    
     # plot out learning curves
+    print(mf_als.train_mse)
+
     plot_learning_curve(iter_array, mf_als)
-    
+
 
 def plot_learning_curve(iter_array, model):
     """ Plot learning curves (hasn't been tested) """
-    plt.plot(iter_array, model.train_mse,
-             label='Training', linewidth=5)
-    plt.plot(iter_array, model.test_mse,
-             label='Test', linewidth=5)
+    #plt.plot(iter_array, model.train_mse, label='Training', linewidth=5)
+    plt.plot(iter_array, model, label='Test', linewidth=5, color='g')
 
-    plt.xticks(fontsize=16)
+    plt.xticks(iter_array, fontsize=16)
     plt.yticks(fontsize=16)
-    plt.xlabel('iterations', fontsize=30)
+    plt.xlabel('Active Time', fontsize=30)
     plt.ylabel('MSE', fontsize=30)
     plt.legend(loc='best', fontsize=20)
-    
+    plt.show()
 
 if __name__ == '__main__':
     fpath = '../active1000'
@@ -431,24 +467,24 @@ if __name__ == '__main__':
     df = load_data(fpath, flist)
     ###### Get Statistics from dataset ############
     print("Basic statistics of the dataset...")
-    #statistics(df)
-    #load_time(df)
+    # statistics(df)
+
+
     ###### Recommendations based on Collaborative Filtering (Matrix Factorization) #######
-    #print("Recommendation based on MF...")
+    print("Recommendation based on MF...")
     #collaborative_filtering(df)
-    
+    collaborative_activeTime(df)
     ###### Recommendations based on Content-based Method (Cosine Similarity) ############
     print("Recommendation based on content-based method...")
-    content_recommendation(df, k=20)
+    #content_recommendation(df, k=20)
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
+
+
