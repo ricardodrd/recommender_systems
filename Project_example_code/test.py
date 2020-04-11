@@ -14,13 +14,20 @@ from nltk.corpus import stopwords
 # print(df2.head())
 # 
 # intialise data of lists.
-data = {'Name': ['Tom asd', 'nick', 'krish'], 'Age': [["aaa","aa"], ["bbb","bb"], ["ccc","cc"]]}
+data = {'Name': ['Tom asd', 'nick', 'krish'], 'category': ["aa|aaa", "bb|bbb", None]}
+df = pd.DataFrame(data)
+
+df['category'] = df['category'].fillna("").astype('str')
+
+df['category'] = df['category'].str.split('|')
 
 # Create DataFrame
-df = pd.DataFrame(data)
-print(df)
+print(type(df['category']))
+print(df['category'])
+print(df['category'][0])
+print(type(df['category'][0]))
 def create_soup(x):
-    return ''.join(x['Name']) + ' ' + ' '.join(x['Age'])
+    return ''.join(x['Name']) + ' ' + ' '.join(x['category'])
 
 df['soup'] = df.apply(create_soup, axis=1)
 print(df)

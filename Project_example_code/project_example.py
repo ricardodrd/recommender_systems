@@ -11,6 +11,7 @@ import os
 import pandas as pd
 import numpy as np
 import ExplicitMF as mf
+import nltk
 from surprise.model_selection import cross_validate
 
 from surprise import Dataset
@@ -19,19 +20,15 @@ from surprise.model_selection import GridSearchCV
 from surprise import KNNWithMeans
 from surprise import SVD
 from surprise import NMF
-from surprise import SVDpp
 from nltk.corpus import stopwords
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.feature_extraction.text import CountVectorizer
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from sklearn.metrics.pairwise import linear_kernel
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 
-sns.set()
 
 
 def traverse_dir(rootDir, level=2):
@@ -87,15 +84,16 @@ def statistics(df):
     print(df_ref['activeTime'].describe())
 
     # ----------------------------------------------------------------------
-    df_active1 = df_ref[df_ref['activeTime'].notnull()]
-    print(df_active1.shape)
-    df_active = df_ref[(df_ref['activeTime'].notnull()) & (df_ref['activeTime'] < 250)]
-    print(df_active.shape)
+    #       Active time distribution analysis
+    # ----------------------------------------------------------------------
+    df_active = df_ref[df_ref['activeTime'].notnull()]
 
-    # sns.distplot(df_active['activeTime'])
-    plt.hist(df_active1['activeTime'], bins=20, color='lightseagreen')
+    plt.hist(df_active['activeTime'], bins=20, color='lightseagreen')
+    plt.xlabel("Active Time")
+    plt.ylabel("Occurences")
     plt.show()
-    plt.boxplot(df_active1['activeTime'])
+    plt.boxplot(df_active['activeTime'])
+    plt.ylabel("Active Time")
     plt.show()
     #----------------------------------------------------------------------
 
@@ -107,6 +105,11 @@ def statistics(df):
 
 
 def get_data_time_intervals(df, partitions=2, time=10):
+    """
+        This function returns a surprise dataset from a given dataframe
+        depending on the number of intervals used to assign the scores to the active time.
+        In the case only two partitions are used it is possible to specify the value of the threashold used
+    """
     reader = Reader()
     df.loc[df['activeTime'] <= time, 'rating'] = 1
     if (partitions == 2):
@@ -127,8 +130,8 @@ def get_data_time_intervals(df, partitions=2, time=10):
 def compare_parameters_SVD(df, opt='time'):
     """
         This function plots the results of the mse error. It allows two options.
-            opt=True: compares mse for different number of divisions in active time.
-            opt=False: compares mse for two divisions of active time using different times.
+            opt='intervals': compares mse for different number of divisions in active time.(All those available in get_data_time_intervals)
+            opt='time': compares mse for different threashold active times for two intervals.
     """
     datasets = []
     intervals = []
@@ -141,9 +144,9 @@ def compare_parameters_SVD(df, opt='time'):
         for interval in intervals:
             datasets.append(get_data_time_intervals(df, interval))
 
-    # --------------------------------------------------
+    # -------------------------------------------------------
     #       Compare activetimes using only two intervals
-    # --------------------------------------------------
+    # -------------------------------------------------------
     else:
         intervals = [5, 10, 20, 30, 60]
         for time in intervals:
@@ -152,24 +155,33 @@ def compare_parameters_SVD(df, opt='time'):
     results = []
     for data in datasets:
         results.append(SVD_best(data))
+    #Modified version of the original plot function
     plot_learning_curve(intervals, results)
 
 
 def collaborative_activeTime(df):
+
     df_raw = df[(df['documentId'].notnull()) & (df['activeTime'].notnull())]
     df_raw.drop_duplicates(subset=['userId', 'documentId', 'activeTime'])
     df_activetime = df_raw[['userId', 'documentId', 'activeTime']]
+    # Obtaining for each user and document the maximum value of active time available
     df_activetime = df_activetime.groupby(['userId', 'documentId'], sort=False)['activeTime'].max().reset_index()
 
+    print("Comparing intervals")
     compare_parameters_SVD(df_activetime, 'intervals')
+    print("Comparing threashold for two intervals")
+    compare_parameters_SVD(df_activetime, 'time')
 
-    exit()
+    print("Comparing mse for different algorithms using two intervals")
     data = get_data_time_intervals(df_activetime, 2)
-    #grid_search(data)
+
+
     # dictionary with the results for each algorithm
     results = {'SVD': SVD_best(data), 'NMF': NMF_best(data),
                'KNN-user_based': KNN_best(data, True), 'KNN-item_based': KNN_best(data, False)}
     plot_results(results)
+
+    # grid_search(data)
 
 def plot_results(data):
     """
@@ -207,6 +219,9 @@ def KNN_best(data, opt=True):
 
 
 def grid_search(data):
+    """
+        This function was originally used to perform grid search on the different algorithms
+    """
     # ---------------------KNN--------------------
     #sim_options = {
     #    "name": "mcd",
@@ -247,21 +262,13 @@ def load_dataset(df):
     ratings = np.zeros((n_users, n_items))
 
     new_user = df['userId'].values[1:] != df['userId'].values[:-1]
-    # print(df['userId'].values[1:])
-    # print(df['userId'].values[:-1])
-    print(np.unique(new_user, return_counts=True))
-    print(df.columns.values)
     new_user = np.r_[True, new_user]
-    print(np.unique(new_user, return_counts=True))
     df['uid'] = np.cumsum(new_user)
-    # print(df['uid'].nunique())
     item_ids = df['documentId'].unique().tolist()
     new_df = pd.DataFrame({'documentId': item_ids, 'tid': range(1, len(item_ids) + 1)})
 
-    # print(df.head())
     df = pd.merge(df, new_df, on='documentId', how='outer')
     df_ext = df[['uid', 'tid']]
-    print(df_ext)
 
     for row in df_ext.itertuples():
         ratings[row[1] - 1, row[2] - 1] = 1.0
@@ -303,8 +310,11 @@ def content_processing_soup(df):
     df.drop_duplicates(subset=['userId', 'documentId'], inplace=True)
     df['title'] = df['title'].map(lambda x: x.replace("- ", "").replace(":", "").replace("?", "").replace("!", ""))
     df['title'] = df['title'].fillna("").astype('str')
-    df['category'] = df['category'].str.split('|')
+    # The values in category are converted into strings separated by a space. This will be useful when merging them with the values of title
     df['category'] = df['category'].fillna("").astype('str')
+    df['category'] = df['category'].map(lambda x: x.replace("|", " "))
+    #df['category'] = df['category'].str.split('|')
+
 
     item_ids = df['documentId'].unique().tolist()
     new_df = pd.DataFrame({'documentId': item_ids, 'tid': range(1, len(item_ids) + 1)})
@@ -312,14 +322,16 @@ def content_processing_soup(df):
     df_item = df[['tid', 'category', 'title']].drop_duplicates(inplace=False)
     df_item.sort_values(by=['tid', 'category'], ascending=True, inplace=True)
 
+    # Joining the values of title and category in an unique column
     df_item['soup'] = df_item.apply(create_soup, axis=1)
+    print(df_item['soup'])
+    #Retrieving common stop words in Norwegian that will be ignored during tf-idf
     stopWordsNorsk = set(stopwords.words('norwegian'))
-    tf = TfidfVectorizer(stop_words=stopWordsNorsk, analyzer='word', ngram_range=(1, 2), min_df=2)
+    tf = TfidfVectorizer(stop_words=stopWordsNorsk, analyzer='word', ngram_range=(1, 2), min_df=1)
     tfidf_matrix = tf.fit_transform(df_item['soup'])
 
     print('Dimension of feature vector: {}'.format(tfidf_matrix.shape))
     # measure similarity of two articles with cosine similarity
-
     cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
 
     print("Similarity Matrix:")
@@ -327,19 +339,22 @@ def content_processing_soup(df):
     return cosine_sim, df
 
 
+
 def create_soup(x):
-    return ''.join(x['title']) + ' ' + ' '.join(x['category'])
+    #Auxiliary function used to merge the column title and category
+    return ''.join(x['title']) + ' ' + ''.join(x['category'])
 
 
 def content_processing_title(df):
     df = df[df['documentId'].notnull()]
     df.drop_duplicates(subset=['userId', 'documentId'], inplace=True)
-
+    # Eliminating symbols from the titles
     df['title'] = df['title'].map(lambda x: x.replace("- ", "").replace(":", "").replace("?", "").replace("!", ""))
 
     # df['title'] = df['title'].str.split(' ')
     df['title'] = df['title'].fillna("").astype('str')
     item_ids = df['documentId'].unique().tolist()
+
     new_df = pd.DataFrame({'documentId': item_ids, 'tid': range(1, len(item_ids) + 1)})
     df = pd.merge(df, new_df, on='documentId', how='outer')
     df_title = df[['tid', 'title']].drop_duplicates(inplace=False)
@@ -385,7 +400,7 @@ def content_processing(df):
     print('Dimension of feature vector: {}'.format(tfidf_matrix.shape))
     # measure similarity of two articles with cosine similarity
 
-    cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
+    cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
 
     print("Similarity Matrix:")
     print(cosine_sim[:4, :4])
@@ -396,11 +411,16 @@ def content_recommendation(df, k=20, opt='category'):
     """
         Generate top-k list according to cosine similarity
         Conten-based recommendation based on category, title or a combination of both
+        This function was extended to take as a parameter the type of content-based recommender.
+        This is: category-based (opt='category'), title-based (opt='title') and a combination of both (opt='soup')
     """
-    if(opt=='title'):
+    if opt == 'title':
         cosine_sim, df = content_processing_title(df)
-    elif(opt=='soup'):
+        # downloads the stopwords data from the natural processing library
+        nltk.download('stopwords')
+    elif opt == 'soup':
         cosine_sim, df = content_processing_soup(df)
+        nltk.download('stopwords')
     else:
         cosine_sim, df = content_processing(df)
 
@@ -467,17 +487,16 @@ if __name__ == '__main__':
     df = load_data(fpath, flist)
     ###### Get Statistics from dataset ############
     print("Basic statistics of the dataset...")
-    # statistics(df)
-
+    statistics(df)
 
     ###### Recommendations based on Collaborative Filtering (Matrix Factorization) #######
     print("Recommendation based on MF...")
-    #collaborative_filtering(df)
     collaborative_activeTime(df)
     ###### Recommendations based on Content-based Method (Cosine Similarity) ############
     print("Recommendation based on content-based method...")
-    #content_recommendation(df, k=20)
-
+    content_recommendation(df, 20, 'soup')
+    #content_recommendation(df, 20)
+    # content_recommendation(df, 20, 'title')
 
 
 
